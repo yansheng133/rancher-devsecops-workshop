@@ -1,11 +1,11 @@
 #! /bin/bash -e
 
-for vm in rancher devsecops-m1 devsecops-w1 devsecops-w2 devsecops-w3 devsecops-w4 cluster1 cluster2; do
+for vm in rancher devsecops-m1 devsecops-w1 devsecops-w2 cluster1 cluster2; do
   echo
   echo "Distribute the self-signed harbor certs to $vm ..."
   scp $HOME/myharbor.sh $vm:~
-  scp $HOME/04-configure-docker-client.sh $vm:~/configure-docker-client.sh
-  ssh $vm ./configure-docker-client.sh
+  scp $HOME/04-configure-containerd-registry.sh $vm:~/configure-containerd-node.sh
+  ssh $vm "sudo ./configure-containerd-node.sh"
 done
 
 #! /bin/bash -e
@@ -60,7 +60,7 @@ helm search repo jenkinsci
 echo Customize jenkins-values.yaml
 sed "s/HARBOR_URL/$HARBOR_URL/g" jenkins-values-template.yaml > my-jenkins-values.yaml
 
-helm install jenkins jenkinsci/jenkins --version 3.5.14 -n jenkins -f my-jenkins-values.yaml
+helm install jenkins jenkinsci/jenkins --version 4.2.17 -n jenkins -f my-jenkins-values.yaml
 
 echo "Your Jenkins instance is provisioning...."
 while [ `kubectl get sts -n jenkins | grep 1/1 | wc -l` -ne 1 ]
@@ -70,11 +70,13 @@ do
   kubectl get sts -n jenkins
 done
 
-export NODE_IP=`cat ../../mylab_vm_list.txt | grep suse0908-devsecops-w1 | cut -d '|' -f 4 | xargs`
+source $HOME/mylab_vm_prefix.sh
+
+export NODE_IP=`cat ../../mylab_vm_list.txt | grep $VM_PREFIX-devsecops-w1 | cut -d '|' -f 4 | xargs`
 export NODE_PORT=$(kubectl get --namespace jenkins -o jsonpath="{.spec.ports[0].nodePort}" services jenkins)
 
 # admin password
-export JENKINS_PWD=$(kubectl exec --namespace jenkins -it svc/jenkins -c jenkins -- /bin/cat /run/secrets/chart-admin-password)
+export JENKINS_PWD=$(kubectl exec --namespace jenkins -it svc/jenkins -c jenkins -- /bin/cat /run/secrets/additional/chart-admin-password && echo)
 
 echo
 echo "Your Jenkins instance is ready ..." > $HOME/myjenkins.txt
@@ -105,6 +107,7 @@ metadata:
   name: m2
   namespace: jenkins-workers
 spec:
+  storageClassName: "longhorn"
   accessModes:
     - ReadWriteOnce
   volumeMode: Filesystem
@@ -131,7 +134,6 @@ rm -f additional-ca-cert-bundle.crt
 echo
 echo --------------------------------
 echo Your Jenkins instance is ready
-echo 
+echo
 cat $HOME/myjenkins.txt
 echo
-
